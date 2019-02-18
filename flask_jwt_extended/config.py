@@ -206,6 +206,17 @@ class _Config(object):
         return delta
 
     @property
+    def two_factor_expires(self):
+        delta = current_app.config['JWT_TWO_FACTOR_TOKEN_EXPIRES']
+        if isinstance(delta, int):
+            delta = datetime.timedelta(seconds=delta)
+        if not isinstance(delta, datetime.timedelta) and delta is not False:
+            err = 'JWT_TWO_FACTOR_TOKEN_EXPIRES must be a ' \
+                  'datetime.timedelta, int or False'
+            raise RuntimeError(err)
+        return delta
+
+    @property
     def algorithm(self):
         return current_app.config['JWT_ALGORITHM']
 
@@ -281,6 +292,10 @@ class _Config(object):
     @property
     def user_claims_in_refresh_token(self):
         return current_app.config['JWT_CLAIMS_IN_REFRESH_TOKEN']
+
+    @property
+    def user_claims_in_two_factor_token(self):
+        return current_app.config['JWT_CLAIMS_IN_TWO_FACTOR_TOKEN']
 
     @property
     def exempt_methods(self):

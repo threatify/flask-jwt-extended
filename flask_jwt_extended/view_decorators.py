@@ -88,6 +88,18 @@ def verify_jwt_refresh_token_in_request():
         _load_user(jwt_data[config.identity_claim_key])
 
 
+def verify_jwt_two_factor_token_in_request():
+    """
+    Ensure that the requester has a valid two factor token.
+
+    Raises an appropiate exception if there is no token or the token is invalid.
+    """
+    if request.method not in config.exempt_methods:
+        jwt_data = _decode_jwt_from_request(request_type='two-factor')
+        ctx_stack.top.jwt = jwt_data
+        _load_user(jwt_data[config.identity_claim_key])
+
+
 def jwt_required(fn):
     """
     A decorator to protect a Flask endpoint.
@@ -153,6 +165,20 @@ def jwt_refresh_token_required(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
         verify_jwt_refresh_token_in_request()
+        return fn(*args, **kwargs)
+    return wrapper
+
+
+def jwt_two_factor_token_required(fn):
+    """
+    A decorator to protect a Flask endpoint.
+
+    If you decorate an endpoint with this, it will ensure that the requester
+    has a valid two-factor token before allowing the endpoint to be called.
+    """
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        verify_jwt_two_factor_token_in_request()
         return fn(*args, **kwargs)
     return wrapper
 

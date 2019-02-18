@@ -22,7 +22,7 @@ from flask_jwt_extended.default_callbacks import (
     default_decode_key_callback, default_encode_key_callback
 )
 from flask_jwt_extended.tokens import (
-    encode_refresh_token, encode_access_token
+    encode_refresh_token, encode_access_token, encode_two_factor_token
 )
 from flask_jwt_extended.utils import get_jwt_identity
 
@@ -188,6 +188,8 @@ class JWTManager(object):
 
         # How long an a token will live before they expire.
         app.config.setdefault('JWT_ACCESS_TOKEN_EXPIRES', datetime.timedelta(minutes=15))
+        app.config.setdefault(
+            'JWT_TWO_FACTOR_TOKEN_EXPIRES', datetime.timedelta(minutes=10))
         app.config.setdefault('JWT_REFRESH_TOKEN_EXPIRES', datetime.timedelta(days=30))
 
         # What algorithm to use to sign the token. See here for a list of options:
@@ -214,6 +216,7 @@ class JWTManager(object):
         app.config.setdefault('JWT_DECODE_LEEWAY', 0)
 
         app.config.setdefault('JWT_CLAIMS_IN_REFRESH_TOKEN', False)
+        app.config.setdefault('JWT_CLAIMS_IN_TWO_FACTOR_TOKEN', False)
 
         app.config.setdefault('JWT_ERROR_MESSAGE_KEY', 'msg')
 
@@ -475,3 +478,25 @@ class JWTManager(object):
             json_encoder=config.json_encoder
         )
         return access_token
+
+    def _create_two_factor_token(self, identity, expires_delta=None):
+        if expires_delta is None:
+            expires_delta = config.two_factor_expires
+
+        if config.user_claims_in_two_factor_token:
+            user_claims = self._user_claims_callback(identity)
+        else:
+            user_claims = None
+
+        two_factor_token = encode_two_factor_token(
+            identity=self._user_identity_callback(identity),
+            secret=self._encode_key_callback(identity),
+            algorithm=config.algorithm,
+            expires_delta=expires_delta,
+            user_claims=user_claims,
+            csrf=config.csrf_protect,
+            identity_claim_key=config.identity_claim_key,
+            user_claims_key=config.user_claims_key,
+            json_encoder=config.json_encoder
+        )
+        return two_factor_token

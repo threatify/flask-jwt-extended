@@ -161,6 +161,27 @@ def create_refresh_token(identity, expires_delta=None):
     return jwt_manager._create_refresh_token(identity, expires_delta)
 
 
+def create_two_factor_token(identity, expires_delta=None):
+    """
+    Creates a new two factor authentication token.
+
+    :param identity: The identity of this token, which can be any data that is
+                     json serializable. It can also be a python object, in which
+                     case you can use the
+                     :meth:`~flask_jwt_extended.JWTManager.user_identity_loader`
+                     to define a callback function that will be used to pull a
+                     json serializable identity out of the object.
+    :param expires_delta: A `datetime.timedelta` for how long this token should
+                          last before it expires. Set to False to disable
+                          expiration. If this is None, it will use the
+                          'JWT_REFRESH_TOKEN_EXPIRES` config value
+                          (see :ref:`Configuration Options`)
+    :return: An encoded two factor token
+    """
+    jwt_manager = _get_jwt_manager()
+    return jwt_manager._create_two_factor_token(identity, expires_delta)
+
+
 def has_user_loader():
     jwt_manager = _get_jwt_manager()
     return jwt_manager._user_loader_callback is not None

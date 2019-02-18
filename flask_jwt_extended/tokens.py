@@ -112,6 +112,41 @@ def encode_refresh_token(identity, secret, algorithm, expires_delta, user_claims
                        json_encoder=json_encoder)
 
 
+def encode_two_factor_token(
+        identity, secret, algorithm, expires_delta, user_claims,
+        csrf, identity_claim_key, user_claims_key, json_encoder=None):
+    """
+    Creates a new encoded (utf-8) two-factor token.
+
+    :param identity: Some identifier used to identify the owner of this token
+    :param secret: Secret key to encode the JWT with
+    :param algorithm: Which algorithm to use for the toek
+    :param expires_delta: How far in the future this token should expire
+                          (set to False to disable expiration)
+    :type expires_delta: datetime.timedelta or False
+    :param user_claims: Custom claims to include in this token. This data must
+                        be json serializable
+    :param csrf: Whether to include a csrf double submit claim in this token
+                 (boolean)
+    :param identity_claim_key: Which key should be used to store the identity
+    :param user_claims_key: Which key should be used to store the user claims
+    :return: Encoded two factor token
+    """
+    token_data = {
+        identity_claim_key: identity,
+        'type': 'two-factor',
+    }
+
+    # Don't add extra data to the token if user_claims is empty.
+    if user_claims:
+        token_data[user_claims_key] = user_claims
+
+    if csrf:
+        token_data['csrf'] = _create_csrf_token()
+    return _encode_jwt(token_data, expires_delta, secret, algorithm,
+                       json_encoder=json_encoder)
+
+
 def decode_jwt(encoded_token, secret, algorithm, identity_claim_key,
                user_claims_key, csrf_value=None, audience=None,
                leeway=0, allow_expired=False):
@@ -144,7 +179,7 @@ def decode_jwt(encoded_token, secret, algorithm, identity_claim_key,
         raise JWTDecodeError("Missing claim: {}".format(identity_claim_key))
     if 'type' not in data:
         data['type'] = 'access'
-    if data['type'] not in ('refresh', 'access'):
+    if data['type'] not in ('refresh', 'access', 'two-factor'):
         raise JWTDecodeError("Missing or invalid claim: type")
     if data['type'] == 'access':
         if 'fresh' not in data:
