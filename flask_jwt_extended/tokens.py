@@ -192,7 +192,7 @@ def encode_two_factor_token(
 def decode_jwt(
     encoded_token,
     secret,
-    algorithm,
+    algorithms,
     identity_claim_key,
     user_claims_key,
     csrf_value=None,
