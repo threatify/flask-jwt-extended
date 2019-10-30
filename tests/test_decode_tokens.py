@@ -1,18 +1,19 @@
 import jwt
 import pytest
 from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
 import warnings
 
 from flask import Flask
 
 from jwt import (
     ExpiredSignatureError, InvalidSignatureError, InvalidAudienceError,
-    ImmatureSignatureError
+    ImmatureSignatureError, InvalidIssuerError, DecodeError
 )
 
 from flask_jwt_extended import (
     JWTManager, create_access_token, decode_token, create_refresh_token,
-    get_jti
+    get_jti, get_unverified_jwt_headers
 )
 from flask_jwt_extended.config import config
 from flask_jwt_extended.exceptions import JWTDecodeError
@@ -103,9 +104,10 @@ def test_bad_token_type(app, default_access_token):
             decode_token(bad_type_token)
 
 
-def test_expired_token(app):
+@pytest.mark.parametrize("delta_func", [timedelta, relativedelta])
+def test_expired_token(app, delta_func):
     with app.test_request_context():
-        delta = timedelta(minutes=-5)
+        delta = delta_func(minutes=-5)
         access_token = create_access_token('username', expires_delta=delta)
         refresh_token = create_refresh_token('username', expires_delta=delta)
         with pytest.raises(ExpiredSignatureError):
@@ -114,9 +116,10 @@ def test_expired_token(app):
             decode_token(refresh_token)
 
 
-def test_allow_expired_token(app):
+@pytest.mark.parametrize("delta_func", [timedelta, relativedelta])
+def test_allow_expired_token(app, delta_func):
     with app.test_request_context():
-        delta = timedelta(minutes=-5)
+        delta = delta_func(minutes=-5)
         access_token = create_access_token('username', expires_delta=delta)
         refresh_token = create_refresh_token('username', expires_delta=delta)
         for token in (access_token, refresh_token):
@@ -243,9 +246,9 @@ def test_valid_aud(app, default_access_token, token_aud):
     app.config['JWT_DECODE_AUDIENCE'] = ['foo', 'bar']
 
     default_access_token['aud'] = token_aud
-    invalid_token = encode_token(app, default_access_token)
+    valid_token = encode_token(app, default_access_token)
     with app.test_request_context():
-        decoded = decode_token(invalid_token)
+        decoded = decode_token(valid_token)
         assert decoded['aud'] == token_aud
 
 
@@ -258,3 +261,37 @@ def test_invalid_aud(app, default_access_token, token_aud):
     with pytest.raises(InvalidAudienceError):
         with app.test_request_context():
             decode_token(invalid_token)
+
+def test_valid_iss(app, default_access_token):
+    app.config['JWT_DECODE_ISSUER'] = 'foobar'
+
+    default_access_token['iss'] = 'foobar'
+    valid_token = encode_token(app, default_access_token)
+    with app.test_request_context():
+        decoded = decode_token(valid_token)
+        assert decoded['iss'] == 'foobar'
+
+def test_invalid_iss(app, default_access_token):
+    app.config['JWT_DECODE_ISSUER'] = 'baz'
+
+    default_access_token['iss'] = 'foobar'
+    invalid_token = encode_token(app, default_access_token)
+    with pytest.raises(InvalidIssuerError):
+        with app.test_request_context():
+            decode_token(invalid_token)
+
+
+def test_malformed_token(app):
+    invalid_token = 'foobarbaz'
+    with pytest.raises(DecodeError):
+        with app.test_request_context():
+            decode_token(invalid_token)
+
+
+def test_jwt_headers(app):
+    jwt_header = {"foo": "bar"}
+    with app.test_request_context():
+        access_token = create_access_token('username', headers=jwt_header)
+        refresh_token = create_refresh_token('username', headers=jwt_header)
+        assert get_unverified_jwt_headers(access_token)["foo"] == "bar"
+        assert get_unverified_jwt_headers(refresh_token)["foo"] == "bar"
