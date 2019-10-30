@@ -2,6 +2,7 @@ import warnings
 
 import pytest
 from datetime import timedelta
+from dateutil.relativedelta import relativedelta
 from flask import Flask
 from flask.json import JSONEncoder
 
@@ -54,6 +55,7 @@ def test_default_configs(app):
         assert config.access_expires == timedelta(minutes=15)
         assert config.refresh_expires == timedelta(days=30)
         assert config.algorithm == 'HS256'
+        assert config.decode_algorithms == ['HS256']
         assert config.is_asymmetric is False
         assert config.blacklist_enabled is False
         assert config.blacklist_checks == ('access', 'refresh')
@@ -72,7 +74,8 @@ def test_default_configs(app):
         assert config.error_msg_key == 'msg'
 
 
-def test_override_configs(app):
+@pytest.mark.parametrize("delta_func", [timedelta, relativedelta])
+def test_override_configs(app, delta_func):
     app.config['JWT_TOKEN_LOCATION'] = ['cookies', 'query_string', 'json']
     app.config['JWT_HEADER_NAME'] = 'TestHeader'
     app.config['JWT_HEADER_TYPE'] = 'TestType'
@@ -100,9 +103,10 @@ def test_override_configs(app):
     app.config['JWT_ACCESS_CSRF_HEADER_NAME'] = 'X-ACCESS-CSRF'
     app.config['JWT_REFRESH_CSRF_HEADER_NAME'] = 'X-REFRESH-CSRF'
 
-    app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(minutes=5)
-    app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=5)
+    app.config['JWT_ACCESS_TOKEN_EXPIRES'] = delta_func(minutes=5)
+    app.config['JWT_REFRESH_TOKEN_EXPIRES'] = delta_func(days=5)
     app.config['JWT_ALGORITHM'] = 'HS512'
+    app.config['JWT_DECODE_ALGORITHMS'] = ['HS512', 'HS256']
 
     app.config['JWT_BLACKLIST_ENABLED'] = True
     app.config['JWT_BLACKLIST_TOKEN_CHECKS'] = ('refresh',)
@@ -151,16 +155,17 @@ def test_override_configs(app):
         assert config.access_csrf_header_name == 'X-ACCESS-CSRF'
         assert config.refresh_csrf_header_name == 'X-REFRESH-CSRF'
 
-        assert config.access_expires == timedelta(minutes=5)
-        assert config.refresh_expires == timedelta(days=5)
+        assert config.access_expires == delta_func(minutes=5)
+        assert config.refresh_expires == delta_func(days=5)
         assert config.algorithm == 'HS512'
+        assert config.decode_algorithms == ['HS512', 'HS256']
 
         assert config.blacklist_enabled is True
         assert config.blacklist_checks == ('refresh',)
         assert config.blacklist_access_tokens is False
         assert config.blacklist_refresh_tokens is True
 
-        assert config.cookie_max_age == 2147483647
+        assert config.cookie_max_age == 31540000
 
         assert config.identity_claim_key == 'foo'
         assert config.user_claims_key == 'bar'
@@ -394,3 +399,11 @@ def test_depreciated_options(app):
             assert len(w) == 2
             assert w[0].category == DeprecationWarning
             assert w[1].category == DeprecationWarning
+
+
+def test_missing_algorithm_in_decode_algorithms(app):
+    app.config['JWT_ALGORITHM'] = 'RS256'
+    app.config['JWT_DECODE_ALGORITHMS'] = ['HS512']
+
+    with app.test_request_context():
+        assert config.decode_algorithms == ['HS512', 'RS256']

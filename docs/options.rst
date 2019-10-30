@@ -18,15 +18,23 @@ General Options:
 ``JWT_TOKEN_LOCATION``            Where to look for a JWT when processing a request. The
                                   options are ``'headers'``, ``'cookies'``, ``'query_string'``, or ``'json'``. You can pass
                                   in a sequence or a set to check more then one location, such as:
-                                  ``('headers', 'cookies')``. Defaults to ``['headers']``
+                                  ``('headers', 'cookies')``. Defaults to ``['headers']``.
+                                  The order sets the precedence, so that if a valid token is
+                                  found in an earlier location in this list, the request is authenticated.
 ``JWT_ACCESS_TOKEN_EXPIRES``      How long an access token should live before it expires. This
-                                  takes a ``datetime.timedelta`` or an ``int`` (seconds), and defaults to 15 minutes.
+                                  takes any value that can be safely added to a ``datetime.datetime`` object, including
+                                  ``datetime.timedelta``, `dateutil.relativedelta <https://dateutil.readthedocs.io/en/stable/relativedelta.html>`_,
+                                  or an ``int`` (seconds), and defaults to 15 minutes.
                                   Can be set to ``False`` to disable expiration.
 ``JWT_REFRESH_TOKEN_EXPIRES``     How long a refresh token should live before it expires. This
-                                  takes a ``datetime.timedelta`` or ``int`` (seconds), and defaults to 30 days.
+                                  takes any value that can be safely added to a ``datetime.datetime`` object, including
+                                  ``datetime.timedelta``, `dateutil.relativedelta <https://dateutil.readthedocs.io/en/stable/relativedelta.html>`_,
+                                  or an ``int`` (seconds), and defaults to 30 days.
                                   Can be set to ``False`` to disable expiration.
 ``JWT_ALGORITHM``                 Which algorithm to sign the JWT with. `See here <https://pyjwt.readthedocs.io/en/latest/algorithms.html>`_
                                   for the options. Defaults to ``'HS256'``.
+``JWT_DECODE_ALGORITHMS``         Which algorithms are allowed to decode a JWT.
+                                  Defaults to a list with only the algorithm set in ``JWT_ALGORITHM``.
 ``JWT_SECRET_KEY``                The secret key needed for symmetric based signing algorithms,
                                   such as ``HS*``. If this is not set, we use the
                                   flask ``SECRET_KEY`` value instead.
@@ -149,6 +157,14 @@ These are only applicable if ``JWT_TOKEN_LOCATION`` is set to use cookies and
                                   Only applicable if ``JWT_CSRF_IN_COOKIES`` is ``True``
 ``JWT_REFRESH_CSRF_COOKIE_PATH``  Path of the CSRF refresh cookie. Defaults to ``'/'``.
                                   Only applicable if ``JWT_CSRF_IN_COOKIES`` is ``True``
+``JWT_CSRF_CHECK_FORM``           When no CSRF token can be found in the header, check the form data. Defaults to
+                                  ``False``.
+``JWT_ACCESS_CSRF_FIELD_NAME``    Name of the form field that should contain the CSRF double submit value for access
+                                  tokens when no header is present. Only applicable if ``JWT_CSRF_CHECK_FORM`` is
+                                  ``True``. Defaults to ``'csrf_token'``.
+``JWT_REFRESH_CSRF_FIELD_NAME``   Name of the form field that should contain the CSRF double submit value for refresh
+                                  tokens when no header is present. Only applicable if ``JWT_CSRF_CHECK_FORM`` is
+                                  ``True``. Defaults to ``'csrf_token'``.
 ================================= =========================================
 
 

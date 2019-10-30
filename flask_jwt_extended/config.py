@@ -1,5 +1,6 @@
 import datetime
 from warnings import warn
+from six import raise_from
 
 # In Python 2.7 collections.abc is a part of the collections module.
 try:
@@ -184,14 +185,30 @@ class _Config(object):
                current_app.config['JWT_REFRESH_CSRF_HEADER_NAME']
 
     @property
+    def csrf_check_form(self):
+        return current_app.config['JWT_CSRF_CHECK_FORM']
+
+    @property
+    def access_csrf_field_name(self):
+        return current_app.config['JWT_ACCESS_CSRF_FIELD_NAME']
+
+    @property
+    def refresh_csrf_field_name(self):
+        return current_app.config['JWT_REFRESH_CSRF_FIELD_NAME']
+
+    @property
     def access_expires(self):
         delta = current_app.config['JWT_ACCESS_TOKEN_EXPIRES']
         if type(delta) is int:
             delta = datetime.timedelta(seconds=delta)
-        if not isinstance(delta, datetime.timedelta) and delta is not False:
-            err = 'JWT_ACCESS_TOKEN_EXPIRES must be a ' \
-                  'datetime.timedelta, int or False'
-            raise RuntimeError(err)
+        if delta is not False:
+            try:
+                delta + datetime.datetime.now()
+            except TypeError as e:
+                err = (
+                    "must be able to add JWT_ACCESS_TOKEN_EXPIRES to datetime.datetime"
+                )
+                raise_from(RuntimeError(err), e)
         return delta
 
     @property
@@ -199,10 +216,14 @@ class _Config(object):
         delta = current_app.config['JWT_REFRESH_TOKEN_EXPIRES']
         if type(delta) is int:
             delta = datetime.timedelta(seconds=delta)
-        if not isinstance(delta, datetime.timedelta) and delta is not False:
-            err = 'JWT_REFRESH_TOKEN_EXPIRES must be a ' \
-                  'datetime.timedelta, int or False'
-            raise RuntimeError(err)
+        if delta is not False:
+            try:
+                delta + datetime.datetime.now()
+            except TypeError as e:
+                err = (
+                    "must be able to add JWT_REFRESH_TOKEN_EXPIRES to datetime.datetime"
+                )
+                raise_from(RuntimeError(err), e)
         return delta
 
     @property
@@ -219,6 +240,15 @@ class _Config(object):
     @property
     def algorithm(self):
         return current_app.config['JWT_ALGORITHM']
+
+    @property
+    def decode_algorithms(self):
+        algorithms = current_app.config['JWT_DECODE_ALGORITHMS']
+        if not algorithms:
+            return [self.algorithm]
+        if self.algorithm not in algorithms:
+            algorithms.append(self.algorithm)
+        return algorithms
 
     @property
     def blacklist_enabled(self):
@@ -278,8 +308,8 @@ class _Config(object):
     def cookie_max_age(self):
         # Returns the appropiate value for max_age for flask set_cookies. If
         # session cookie is true, return None, otherwise return a number of
-        # seconds a long ways in the future
-        return None if self.session_cookie else 2147483647  # 2^31
+        # seconds 1 year in the future
+        return None if self.session_cookie else 31540000  # 1 year
 
     @property
     def identity_claim_key(self):
@@ -312,6 +342,10 @@ class _Config(object):
     @property
     def audience(self):
         return current_app.config['JWT_DECODE_AUDIENCE']
+
+    @property
+    def issuer(self):
+        return current_app.config['JWT_DECODE_ISSUER']
 
     @property
     def leeway(self):

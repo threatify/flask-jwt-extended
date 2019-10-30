@@ -1,6 +1,8 @@
-from flask import current_app
-from werkzeug.local import LocalProxy
 from warnings import warn
+
+from flask import current_app
+from jwt import ExpiredSignatureError
+from werkzeug.local import LocalProxy
 
 try:
     from flask import _app_ctx_stack as ctx_stack
@@ -26,6 +28,15 @@ def get_raw_jwt():
     JWT is currently present, an empty dict is returned instead.
     """
     return getattr(ctx_stack.top, 'jwt', {})
+
+
+def get_raw_jwt_header():
+    """
+    In a protected endpoint, this will return the python dictionary which has
+    the JWT headers values. If no
+    JWT is currently present, an empty dict is returned instead.
+    """
+    return getattr(ctx_stack.top, 'jwt_header', {})
 
 
 def get_jwt_identity():
@@ -77,7 +88,7 @@ def decode_token(encoded_token, csrf_value=None, allow_expired=False):
     """
     jwt_manager = _get_jwt_manager()
     unverified_claims = jwt.decode(
-        encoded_token, verify=False, algorithms=config.algorithm
+        encoded_token, verify=False, algorithms=config.decode_algorithms
     )
     unverified_headers = jwt.get_unverified_header(encoded_token)
     # Attempt to call callback with both claims and headers, but fallback to just claims
@@ -93,17 +104,34 @@ def decode_token(encoded_token, csrf_value=None, allow_expired=False):
         warn(msg, DeprecationWarning)
         secret = jwt_manager._decode_key_callback(unverified_claims)
 
-    return decode_jwt(
-        encoded_token=encoded_token,
-        secret=secret,
-        algorithm=config.algorithm,
-        identity_claim_key=config.identity_claim_key,
-        user_claims_key=config.user_claims_key,
-        csrf_value=csrf_value,
-        audience=config.audience,
-        leeway=config.leeway,
-        allow_expired=allow_expired
-    )
+    try:
+        return decode_jwt(
+            encoded_token=encoded_token,
+            secret=secret,
+            algorithms=config.decode_algorithms,
+            identity_claim_key=config.identity_claim_key,
+            user_claims_key=config.user_claims_key,
+            csrf_value=csrf_value,
+            audience=config.audience,
+            issuer=config.issuer,
+            leeway=config.leeway,
+            allow_expired=allow_expired
+        )
+    except ExpiredSignatureError:
+        expired_token = decode_jwt(
+            encoded_token=encoded_token,
+            secret=secret,
+            algorithms=config.decode_algorithms,
+            identity_claim_key=config.identity_claim_key,
+            user_claims_key=config.user_claims_key,
+            csrf_value=csrf_value,
+            audience=config.audience,
+            issuer=config.issuer,
+            leeway=config.leeway,
+            allow_expired=True
+        )
+        ctx_stack.top.expired_jwt = expired_token
+        raise
 
 
 def _get_jwt_manager():
@@ -114,7 +142,8 @@ def _get_jwt_manager():
                            "application before using this method")
 
 
-def create_access_token(identity, fresh=False, expires_delta=None):
+def create_access_token(identity, fresh=False, expires_delta=None, user_claims=None,
+                        headers=None):
     """
     Create a new access token.
 
@@ -134,13 +163,18 @@ def create_access_token(identity, fresh=False, expires_delta=None):
                           expiration. If this is None, it will use the
                           'JWT_ACCESS_TOKEN_EXPIRES` config value
                           (see :ref:`Configuration Options`)
+    :param user_claims: Optional JSON serializable to override user claims.
+    :param headers: Optional, valid dict for specifying additional headers in JWT
+                    header section
     :return: An encoded access token
     """
     jwt_manager = _get_jwt_manager()
-    return jwt_manager._create_access_token(identity, fresh, expires_delta)
+    return jwt_manager._create_access_token(identity, fresh, expires_delta, user_claims,
+                                            headers=headers)
 
 
-def create_refresh_token(identity, expires_delta=None):
+def create_refresh_token(identity, expires_delta=None, user_claims=None,
+                         headers=None):
     """
     Creates a new refresh token.
 
@@ -155,10 +189,14 @@ def create_refresh_token(identity, expires_delta=None):
                           expiration. If this is None, it will use the
                           'JWT_REFRESH_TOKEN_EXPIRES` config value
                           (see :ref:`Configuration Options`)
+    :param user_claims: Optional JSON serializable to override user claims.
+    :param headers: Optional, valid dict for specifying additional headers in JWT
+                    header section
     :return: An encoded refresh token
     """
     jwt_manager = _get_jwt_manager()
-    return jwt_manager._create_refresh_token(identity, expires_delta)
+    return jwt_manager._create_refresh_token(identity, expires_delta, user_claims,
+                                             headers=headers)
 
 
 def create_two_factor_token(identity, expires_delta=None):
@@ -397,3 +435,15 @@ def unset_refresh_cookies(response):
                             domain=config.cookie_domain,
                             path=config.refresh_csrf_cookie_path,
                             samesite=config.cookie_samesite)
+
+
+def get_unverified_jwt_headers(encoded_token):
+    """
+    Returns the Headers of an encoded JWT without verifying the actual signature of JWT.
+     Note: The signature is not verified so the header parameters
+     should not be fully trusted until signature verification is complete
+
+    :param encoded_token: The encoded JWT to get the Header from.
+    :return: JWT header parameters as python dict()
+    """
+    return jwt.get_unverified_header(encoded_token)

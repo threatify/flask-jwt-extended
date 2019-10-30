@@ -1,9 +1,9 @@
 from functools import wraps
 from datetime import datetime
 from calendar import timegm
+from re import split
 
 from werkzeug.exceptions import BadRequest
-from jwt import ExpiredSignatureError
 
 from flask import request
 try:
@@ -18,7 +18,7 @@ from flask_jwt_extended.exceptions import (
 )
 from flask_jwt_extended.utils import (
     decode_token, has_user_loader, user_loader, verify_token_claims,
-    verify_token_not_blacklisted, verify_token_type
+    verify_token_not_blacklisted, verify_token_type, get_unverified_jwt_headers
 )
 
 
@@ -29,8 +29,9 @@ def verify_jwt_in_request():
     no token or if the token is invalid.
     """
     if request.method not in config.exempt_methods:
-        jwt_data = _decode_jwt_from_request(request_type='access')
+        jwt_data, jwt_header = _decode_jwt_from_request(request_type='access')
         ctx_stack.top.jwt = jwt_data
+        ctx_stack.top.jwt_header = jwt_header
         verify_token_claims(jwt_data)
         _load_user(jwt_data[config.identity_claim_key])
 
@@ -48,8 +49,9 @@ def verify_jwt_in_request_optional():
     """
     try:
         if request.method not in config.exempt_methods:
-            jwt_data = _decode_jwt_from_request(request_type='access')
+            jwt_data, jwt_header = _decode_jwt_from_request(request_type='access')
             ctx_stack.top.jwt = jwt_data
+            ctx_stack.top.jwt_header = jwt_header
             verify_token_claims(jwt_data)
             _load_user(jwt_data[config.identity_claim_key])
     except (NoAuthorizationError, InvalidHeaderError):
@@ -63,8 +65,9 @@ def verify_fresh_jwt_in_request():
     token is not marked as fresh.
     """
     if request.method not in config.exempt_methods:
-        jwt_data = _decode_jwt_from_request(request_type='access')
+        jwt_data, jwt_header = _decode_jwt_from_request(request_type='access')
         ctx_stack.top.jwt = jwt_data
+        ctx_stack.top.jwt_header = jwt_header
         fresh = jwt_data['fresh']
         if isinstance(fresh, bool):
             if not fresh:
@@ -83,8 +86,9 @@ def verify_jwt_refresh_token_in_request():
     exception if there is no token or the token is invalid.
     """
     if request.method not in config.exempt_methods:
-        jwt_data = _decode_jwt_from_request(request_type='refresh')
+        jwt_data, jwt_header = _decode_jwt_from_request(request_type='refresh')
         ctx_stack.top.jwt = jwt_data
+        ctx_stack.top.jwt_header = jwt_header
         _load_user(jwt_data[config.identity_claim_key])
 
 
@@ -197,12 +201,29 @@ def _decode_jwt_from_headers():
     header_type = config.header_type
 
     # Verify we have the auth header
-    jwt_header = request.headers.get(header_name, None)
-    if not jwt_header:
+    auth_header = request.headers.get(header_name, None)
+    if not auth_header:
         raise NoAuthorizationError("Missing {} Header".format(header_name))
 
     # Make sure the header is in a valid format that we are expecting, ie
     # <HeaderName>: <HeaderType(optional)> <JWT>
+    jwt_header = None
+
+    # Check if header is comma delimited, ie
+    # <HeaderName>: <field> <value>, <field> <value>, etc...
+    if header_type:
+        field_values = split(r',\s*', auth_header)
+        jwt_header = [s for s in field_values if s.split()[0] == header_type]
+        if len(jwt_header) < 1 or len(jwt_header[0].split()) != 2:
+            msg = "Bad {} header. Expected value '{} <JWT>'".format(
+                header_name,
+                header_type
+            )
+            raise InvalidHeaderError(msg)
+        jwt_header = jwt_header[0]
+    else:
+        jwt_header = auth_header
+
     parts = jwt_header.split()
     if not header_type:
         if len(parts) != 1:
@@ -210,12 +231,6 @@ def _decode_jwt_from_headers():
             raise InvalidHeaderError(msg)
         encoded_token = parts[0]
     else:
-        if parts[0] != header_type or len(parts) != 2:
-            msg = "Bad {} header. Expected value '{} <JWT>'".format(
-                header_name,
-                header_type
-            )
-            raise InvalidHeaderError(msg)
         encoded_token = parts[1]
 
     return encoded_token, None
@@ -225,9 +240,11 @@ def _decode_jwt_from_cookies(request_type):
     if request_type == 'access':
         cookie_key = config.access_cookie_name
         csrf_header_key = config.access_csrf_header_name
+        csrf_field_key = config.access_csrf_field_name
     else:
         cookie_key = config.refresh_cookie_name
         csrf_header_key = config.refresh_csrf_header_name
+        csrf_field_key = config.refresh_csrf_field_name
 
     encoded_token = request.cookies.get(cookie_key)
     if not encoded_token:
@@ -235,8 +252,10 @@ def _decode_jwt_from_cookies(request_type):
 
     if config.csrf_protect and request.method in config.csrf_request_methods:
         csrf_value = request.headers.get(csrf_header_key, None)
+        if not csrf_value and config.csrf_check_form:
+            csrf_value = request.form.get(csrf_field_key, None)
         if not csrf_value:
-            raise CSRFError("Missing CSRF token in headers")
+            raise CSRFError("Missing CSRF token")
     else:
         csrf_value = None
 
@@ -274,29 +293,33 @@ def _decode_jwt_from_json(request_type):
 def _decode_jwt_from_request(request_type):
     # All the places we can get a JWT from in this request
     get_encoded_token_functions = []
-    if config.jwt_in_cookies:
-        get_encoded_token_functions.append(lambda: _decode_jwt_from_cookies(request_type))
-    if config.jwt_in_query_string:
-        get_encoded_token_functions.append(_decode_jwt_from_query_string)
-    if config.jwt_in_headers:
-        get_encoded_token_functions.append(_decode_jwt_from_headers)
-    if config.jwt_in_json:
-        get_encoded_token_functions.append(lambda: _decode_jwt_from_json(request_type))
+
+    locations = config.token_location
+
+    # add the functions in the order specified in JWT_TOKEN_LOCATION
+    for location in locations:
+        if location == 'cookies':
+            get_encoded_token_functions.append(
+                lambda: _decode_jwt_from_cookies(request_type))
+        if location == 'query_string':
+            get_encoded_token_functions.append(_decode_jwt_from_query_string)
+        if location == 'headers':
+            get_encoded_token_functions.append(_decode_jwt_from_headers)
+        if location == 'json':
+            get_encoded_token_functions.append(
+                lambda: _decode_jwt_from_json(request_type))
 
     # Try to find the token from one of these locations. It only needs to exist
     # in one place to be valid (not every location).
     errors = []
     decoded_token = None
+    jwt_header = None
     for get_encoded_token_function in get_encoded_token_functions:
         try:
             encoded_token, csrf_token = get_encoded_token_function()
             decoded_token = decode_token(encoded_token, csrf_token)
+            jwt_header = get_unverified_jwt_headers(encoded_token)
             break
-        except ExpiredSignatureError:
-            # Save the expired token so we can access it in a callback later
-            expired_data = decode_token(encoded_token, csrf_token, allow_expired=True)
-            ctx_stack.top.expired_jwt = expired_data
-            raise
         except NoAuthorizationError as e:
             errors.append(str(e))
 
@@ -318,4 +341,4 @@ def _decode_jwt_from_request(request_type):
 
     verify_token_type(decoded_token, expected_type=request_type)
     verify_token_not_blacklisted(decoded_token, request_type)
-    return decoded_token
+    return decoded_token, jwt_header

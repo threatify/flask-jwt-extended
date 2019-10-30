@@ -1,11 +1,13 @@
 import pytest
 import warnings
 from datetime import timedelta
+from dateutil.relativedelta import relativedelta
 from flask import Flask, jsonify
 
 from flask_jwt_extended import (
     jwt_required, fresh_jwt_required, JWTManager, jwt_refresh_token_required,
-    jwt_optional, create_access_token, create_refresh_token, get_jwt_identity
+    jwt_optional, create_access_token, create_refresh_token, get_jwt_identity,
+    decode_token
 )
 from tests.utils import make_headers, encode_token, get_jwt_manager
 
@@ -146,7 +148,8 @@ def test_refresh_jwt_required(app):
     assert response.get_json() == {'foo': 'bar'}
 
 
-def test_jwt_optional(app):
+@pytest.mark.parametrize("delta_func", [timedelta, relativedelta])
+def test_jwt_optional(app, delta_func):
     url = '/optional_protected'
 
     test_client = app.test_client()
@@ -156,7 +159,7 @@ def test_jwt_optional(app):
         refresh_token = create_refresh_token('username')
         expired_token = create_access_token(
             identity='username',
-            expires_delta=timedelta(minutes=-1)
+            expires_delta=delta_func(minutes=-1)
         )
 
     response = test_client.get(url, headers=make_headers(fresh_access_token))
@@ -213,7 +216,6 @@ def test_jwt_missing_claims(app):
 
 def test_jwt_invalid_audience(app):
     url = '/protected'
-    jwtM = get_jwt_manager(app)
     test_client = app.test_client()
 
     # No audience claim expected or provided - OK
@@ -235,12 +237,46 @@ def test_jwt_invalid_audience(app):
     assert response.get_json() == {'msg': 'Invalid audience'}
 
 
-def test_expired_token(app):
+def test_jwt_invalid_issuer(app):
+    url = '/protected'
+    test_client = app.test_client()
+
+    # No issuer claim expected or provided - OK
+    access_token = encode_token(app, {'identity': 'me'})
+    response = test_client.get(url, headers=make_headers(access_token))
+    assert response.status_code == 200
+
+    # Issuer claim expected and not provided - not OK
+    app.config['JWT_DECODE_ISSUER'] = 'my_issuer'
+    access_token = encode_token(app, {'identity': 'me'})
+    response = test_client.get(url, headers=make_headers(access_token))
+    assert response.status_code == 422
+    assert response.get_json() == {'msg': 'Token is missing the "iss" claim'}
+
+    # Issuer claim still expected and wrong one provided - not OK
+    access_token = encode_token(app, {'iss': 'different_issuer', 'identity': 'me'})
+    response = test_client.get(url, headers=make_headers(access_token))
+    assert response.status_code == 422
+    assert response.get_json() == {'msg': 'Invalid issuer'}
+
+
+def test_malformed_token(app):
+    url = '/protected'
+    test_client = app.test_client()
+
+    access_token = 'foobarbaz'
+    response = test_client.get(url, headers=make_headers(access_token))
+    assert response.status_code == 422
+    assert response.get_json() == {'msg': 'Not enough segments'}
+
+
+@pytest.mark.parametrize("delta_func", [timedelta, relativedelta])
+def test_expired_token(app, delta_func):
     url = '/protected'
     jwtM = get_jwt_manager(app)
     test_client = app.test_client()
     with app.test_request_context():
-        token = create_access_token('username', expires_delta=timedelta(minutes=-1))
+        token = create_access_token('username', expires_delta=delta_func(minutes=-1))
 
     # Test default response
     response = test_client.get(url, headers=make_headers(token))
@@ -272,6 +308,26 @@ def test_expired_token(app):
         assert response.status_code == 201
         assert response.get_json() == {'msg': 'foobar'}
         assert len(w) == 0
+
+
+def test_expired_token_via_decode_token(app):
+    jwtM = get_jwt_manager(app)
+
+    @jwtM.expired_token_loader
+    def depreciated_custom_response(expired_token):
+        assert expired_token['identity'] == 'username'
+        return jsonify(msg='foobar'), 401
+
+    @app.route('/test')
+    def test_route():
+        token = create_access_token('username', expires_delta=timedelta(minutes=-1))
+        decode_token(token)
+        return jsonify(msg='baz'), 200
+
+    test_client = app.test_client()
+    response = test_client.get('/test')
+    assert response.get_json() == {'msg': 'foobar'}
+    assert response.status_code == 401
 
 
 def test_no_token(app):
