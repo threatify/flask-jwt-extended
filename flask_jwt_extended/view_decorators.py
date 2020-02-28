@@ -99,7 +99,7 @@ def verify_jwt_two_factor_token_in_request():
     Raises an appropiate exception if there is no token or the token is invalid.
     """
     if request.method not in config.exempt_methods:
-        jwt_data = _decode_jwt_from_request(request_type='two-factor')
+        jwt_data, _ = _decode_jwt_from_request(request_type='two-factor')
         ctx_stack.top.jwt = jwt_data
         _load_user(jwt_data[config.identity_claim_key])
 
