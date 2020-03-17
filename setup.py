@@ -7,13 +7,16 @@ import io
 import re
 from setuptools import setup
 
+with io.open("flask_jwt_extended/__init__.py", encoding="utf-8") as f:
+    version = re.search(r"__version__ = '(.+)'", f.read()).group(1)
+
 with open("README.md", "r") as f:
     long_description = f.read()
 
 
 setup(
     name="Flask-JWT-Extended",
-    version="3.24.1",
+    version=version,
     url="https://github.com/vimalloc/flask-jwt-extended",
     license="MIT",
     author="Landon Gilbert-Bland",
@@ -41,9 +44,10 @@ setup(
         "Programming Language :: Python",
         "Programming Language :: Python :: 2.7",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.4",
         "Programming Language :: Python :: 3.5",
         "Programming Language :: Python :: 3.6",
+        "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
         "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
         "Topic :: Software Development :: Libraries :: Python Modules",
     ],
